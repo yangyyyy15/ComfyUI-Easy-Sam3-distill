@@ -1122,140 +1122,50 @@ class Sam3VideoSegmentation(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="easy sam3VideoSegmentation",
-            display_name="SAM3 Video Segmentation",
+            display_name="SAM3 Video Segmentation (Multi-Prompt)",
             category="EasyUse/Sam3",
-            description="Track and segment objects across video frames using SAM3",
+            description="Track and segment objects across video frames using SAM3 with Cache Reuse",
             inputs=[
                 io.Custom(io_type="EASY_SAM3_MODEL").Input(
                     "sam3_model",
                     display_name="SAM3 Model",
                     tooltip="SAM3 model loaded from LoadSam3Model node (must be video mode)"
                 ),
-                io.String.Input(
-                    "session_id",
-                    default=None,
-                    force_input=True,
-                    optional=True,
-                ),
-                io.Image.Input(
-                    "video_frames",
-                    tooltip="Video frames as image sequence"
-                ),
-                io.String.Input(
-                    "prompt",
-                    default="",
-                    multiline=True,
-                    tooltip="支持多目标追踪：请用逗号分隔不同物体 (例如: 'shirt, mask, person')"
-                ),
-                io.Int.Input(
-                    "frame_index",
-                    min=0,
-                    max=10 ** 5,
-                    step=1,
-                    tooltip="Frame where initial prompt is applied",
-                ),
-                io.Int.Input(
-                    "object_id",
-                    default=1,
-                    min=1,
-                    max=1000,
-                    step=1,
-                    tooltip="起始的 Object ID (多目标会自动递增此 ID)"
-                ),
-                io.Float.Input(
-                    "score_threshold_detection",
-                    default=0.5,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    tooltip="Confidence threshold for detections, default is 0.5"
-                ),
-                io.Float.Input(
-                    "new_det_thresh",
-                    default=0.7,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    tooltip="Threshold for a detection to be added as a new object, default is 0.7"
-                ),
-                io.Combo.Input(
-                    "propagation_direction",
-                    options=["both", "forward", "backward"],
-                    default="both",
-                ),
-                io.Int.Input(
-                    "start_frame_index",
-                    default=0,
-                    min=0,
-                    max=10**5,
-                    step=1,
-                ),
-                io.Int.Input(
-                    "max_frames_to_track",
-                    default=-1,
-                    min=-1,
-                    tooltip="Advanced: Max frames to process (-1 for all)"
-                ),
-                io.Boolean.Input(
-                    "close_after_propagation",
-                    default=True,
-                    tooltip="Close the session after propagation"
-                ),
-                io.Boolean.Input(
-                  "keep_model_loaded",
-                  default=False,
-                ),
-                io.Custom(io_type="EASY_SAM3_EXTRA_CONFIG").Input(
-                    "extra_config",
-                    display_name="SAM3 Model Config",
-                    tooltip="Extra configuration for the SAM3 model",
-                    optional=True,
-                ),
-                io.String.Input(
-                  "positive_coords",
-                  display_name="positive_coords",
-                  tooltip="Positive click coordinates as JSON: '[{\"x\": 50, \"y\": 120}]'",
-                  optional=True,
-                  force_input=True,
-                ),
-                io.String.Input(
-                    "negative_coords",
-                    display_name="negative_coords",
-                    tooltip="Negative click coordinates as JSON: '[{\"x\": 150, \"y\": 300}]'",
-                    optional=True,
-                    force_input=True,
-                ),
-                io.BBOX.Input(
-                    "bbox",
-                    display_name="bbox",
-                    optional=True,
-                    tooltip="Bounding box as (x_min, y_min, x_max, y_max) or (x, y, width, height) tuple. Compatible with KJNodes Points Editor bbox output."
-                ),
+                io.String.Input("session_id", default=None, force_input=True, optional=True),
+                io.Image.Input("video_frames", tooltip="Video frames as image sequence"),
+                
+                # --- 新增: 4个独立的提示词输入框 ---
+                io.String.Input("prompt_1", default="", multiline=True, tooltip="第1个部位提示词 (如: shirt)"),
+                io.String.Input("prompt_2", default="", multiline=True, tooltip="第2个部位提示词 (如: mask)"),
+                io.String.Input("prompt_3", default="", multiline=True, tooltip="第3个部位提示词"),
+                io.String.Input("prompt_4", default="", multiline=True, tooltip="第4个部位提示词"),
+                
+                io.Int.Input("frame_index", min=0, max=10 ** 5, step=1, tooltip="Frame where initial prompt is applied"),
+                io.Float.Input("score_threshold_detection", default=0.5, min=0.0, max=1.0, step=0.05, tooltip="Confidence threshold for detections, default is 0.5"),
+                io.Float.Input("new_det_thresh", default=0.7, min=0.0, max=1.0, step=0.05, tooltip="Threshold for a detection to be added as a new object, default is 0.7"),
+                io.Combo.Input("propagation_direction", options=["both", "forward", "backward"], default="both"),
+                io.Int.Input("start_frame_index", default=0, min=0, max=10**5, step=1),
+                io.Int.Input("max_frames_to_track", default=-1, min=-1, tooltip="Advanced: Max frames to process (-1 for all)"),
+                io.Boolean.Input("close_after_propagation", default=True, tooltip="Close the session after propagation"),
+                io.Boolean.Input("keep_model_loaded", default=False),
+                io.Custom(io_type="EASY_SAM3_EXTRA_CONFIG").Input("extra_config", display_name="SAM3 Model Config", optional=True),
+                io.String.Input("positive_coords", display_name="positive_coords", optional=True, force_input=True),
+                io.String.Input("negative_coords", display_name="negative_coords", optional=True, force_input=True),
+                io.BBOX.Input("bbox", display_name="bbox", optional=True),
             ],
             outputs=[
-                io.Mask.Output(
-                    "output_masks",
-                    display_name="masks",
-                    tooltip="Tracked segmentation masks for all frames",
-                ),
-                io.String.Output(
-                    "session_id_output",
-                    display_name="session_id",
-                ),
-                io.Custom(io_type="EASY_SAM3_OBJECTS_OUTPUT").Output(
-                    "objects",
-                    display_name="objects"
-                ),
-                io.Mask.Output(
-                    "obj_masks",
-                    display_name="obj_masks"
-                )
+                # --- 新增: 直接输出分离的遮罩 ---
+                io.Mask.Output("mask_1", display_name="mask_1"),
+                io.Mask.Output("mask_2", display_name="mask_2"),
+                io.Mask.Output("mask_3", display_name="mask_3"),
+                io.Mask.Output("mask_4", display_name="mask_4"),
+                io.Mask.Output("combined_masks", display_name="combined_masks"),
+                io.String.Output("session_id_output", display_name="session_id"),
             ]
         )
 
-
     @classmethod
-    def execute(cls, sam3_model, video_frames, prompt, frame_index, object_id, score_threshold_detection, new_det_thresh, propagation_direction, start_frame_index=0, max_frames_to_track=-1, close_after_propagation=True,  keep_model_loaded=False, session_id=None, extra_config=None, positive_coords=None, negative_coords=None, bbox=None,) -> io.NodeOutput:
+    def execute(cls, sam3_model, video_frames, prompt_1, prompt_2, prompt_3, prompt_4, frame_index, score_threshold_detection, new_det_thresh, propagation_direction, start_frame_index=0, max_frames_to_track=-1, close_after_propagation=True, keep_model_loaded=False, session_id=None, extra_config=None, positive_coords=None, negative_coords=None, bbox=None) -> io.NodeOutput:
         offload_device = mm.unet_offload_device()
 
         video_predictor = sam3_model.get("model", None)
@@ -1268,17 +1178,13 @@ class Sam3VideoSegmentation(io.ComfyNode):
             raise ValueError("Invalid SAM3 model. Please load a SAM3 model in 'video' mode")
 
         if frame_index > B - 1:
-            logger.info(f"Frame index {frame_index} is out of bounds, setting to last frame")
             frame_index = B - 1
         if start_frame_index > B:
-            logger.info(f"Last Frame index {frame_index} is out of bounds, setting to last frame")
             start_frame_index = B
 
         # Set video model config
         video_predictor.model.score_threshold_detection = score_threshold_detection
         video_predictor.model.new_det_thresh = new_det_thresh
-
-        # Set default values for video model parameters
         video_predictor.model.assoc_iou_thresh = 0.1
         video_predictor.model.det_nms_thresh = 0.1
         video_predictor.model.hotstart_delay = 15
@@ -1297,14 +1203,11 @@ class Sam3VideoSegmentation(io.ComfyNode):
         video_predictor.model.image_size = 1008
 
         if extra_config is not None and isinstance(extra_config, dict):
-            logger.info(f"Applying extra config: {extra_config}")
             for key, value in extra_config.items():
                 if hasattr(video_predictor.model, key):
                     setattr(video_predictor.model, key, value)
-                else:
-                    logger.warning(f"Model does not have attribute: {key}")
 
-        # Start session (Extract Image Embeddings - only happens once)
+        # 1. 启动会话 (提取并缓存全视频的特征，最耗时的一步)
         video_pil = tensor_to_pil(video_frames)
         response = video_predictor.handle_request(
             request=dict(
@@ -1315,17 +1218,17 @@ class Sam3VideoSegmentation(io.ComfyNode):
         )
 
         session_id = response.get("session_id", None)
-        if session_id is None:
-            raise ValueError("Failed to start video prediction session")
+        # 获取底层状态字典，用于后续的缓存“劫持”
+        session = video_predictor._get_session(session_id)
+        inference_state = session["state"]
 
-        # Switch model to main device
         video_predictor.model.to(device)
 
         autocast_condition = not mm.is_device_mps(device)
         with torch.autocast(mm.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext():
 
-            pos_points, pos_count, pos_errors = parse_points(positive_coords, video_frames.shape)
-            neg_points, neg_count, neg_errors = parse_points(negative_coords, video_frames.shape)
+            pos_points, pos_count, _ = parse_points(positive_coords, video_frames.shape)
+            neg_points, neg_count, _ = parse_points(negative_coords, video_frames.shape)
             points = None
             point_labels = None
             if pos_points is not None and neg_points is not None:
@@ -1346,87 +1249,85 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     bounding_boxes = bbox_coords
                     bounding_box_labels = [1] * bbox_count
 
-            # --- 新增: 多目标 Prompt 解析逻辑 ---
-            text_prompts = [p.strip() for p in prompt.split(',')] if prompt and prompt.strip() else []
-            
-            if len(text_prompts) > 0:
-                logger.info(f"检测到 {len(text_prompts)} 个文本提示，开始多目标注册...")
-                for idx, text_prompt in enumerate(text_prompts):
-                    current_obj_id = object_id + idx
+            # 整理任务队列
+            prompts = [prompt_1, prompt_2, prompt_3, prompt_4]
+            active_tasks = []
+            for idx, p in enumerate(prompts):
+                has_text = p is not None and p.strip() != ""
+                has_geo = (idx == 0) and (points is not None or bounding_boxes is not None)
+                if has_text or has_geo:
+                    active_tasks.append({
+                        "orig_idx": idx,
+                        "text": p.strip() if has_text else None,
+                        "use_geo": has_geo
+                    })
+
+            # 初始化输出列表
+            output_masks_list = [torch.zeros((B, H, W), dtype=torch.float32) for _ in range(4)]
+            combined_masks_tensor = torch.zeros((B, H, W), dtype=torch.float32)
+
+            if len(active_tasks) > 0:
+                for task_i, task in enumerate(active_tasks):
+                    logger.info(f"🚀 开始处理部位 {task['orig_idx'] + 1}: {task['text']}")
                     
-                    # 为了防止坐标污染，仅将坐标/选框分配给第一个物体（除非你想后续改进 UI 分配）
-                    req_points = points if idx == 0 else None
-                    req_point_labels = point_labels if idx == 0 else None
-                    req_bboxes = bounding_boxes if idx == 0 else None
-                    req_bbox_labels = bounding_box_labels if idx == 0 else None
+                    # 💡 核心魔法：从第二个词开始，备份特征缓存字典 (浅拷贝足以保留 Tensor 引用)
+                    if task_i > 0:
+                        saved_cache = inference_state.get("feature_cache", {}).copy()
+                        
+                    req_points = points if task["use_geo"] else None
+                    req_point_labels = point_labels if task["use_geo"] else None
+                    req_bboxes = bounding_boxes if task["use_geo"] else None
+                    req_bbox_labels = bounding_box_labels if task["use_geo"] else None
                     
+                    # add_prompt 内部会清空 inference_state 以保证干净的开始
                     video_predictor.handle_request(
                         request=dict(
                             type="add_prompt",
                             session_id=session_id,
                             frame_index=frame_index,
-                            text=text_prompt,
+                            text=task["text"],
                             bounding_boxes=req_bboxes,
                             bounding_box_labels=req_bbox_labels,
                             points=req_points,
                             point_labels=req_point_labels,
-                            obj_id=current_obj_id
+                            obj_id=1  # 每次都独立追踪，重置为 1
                         )
                     )
-            else:
-                # 兼容只传坐标或选框的情况
-                video_predictor.handle_request(
-                    request=dict(
-                        type="add_prompt",
-                        session_id=session_id,
-                        frame_index=frame_index,
-                        text=None,
-                        bounding_boxes=bounding_boxes,
-                        bounding_box_labels=bounding_box_labels,
-                        points=points,
-                        point_labels=point_labels,
-                        obj_id=object_id
-                    )
-                )
+                    
+                    # 💡 核心魔法：在它清空后，立刻把特征缓存塞回去！跳过重新提取特征的耗时
+                    if task_i > 0:
+                        inference_state["feature_cache"].update(saved_cache)
+                        
+                    # 开始传播追踪 (极速)
+                    output_masks = torch.zeros((B, H, W), dtype=torch.float32)
+                    pbar = comfy.utils.ProgressBar(B)
+                    processed_frames = 0
+                    
+                    for response in video_predictor.handle_stream_request(
+                        request=dict(
+                            type="propagate_in_video",
+                            session_id=session_id,
+                            propagation_direction=propagation_direction,
+                            start_frame_index=start_frame_index,
+                            max_frame_num_to_track=max_frames_to_track if max_frames_to_track != -1 else None,
+                        )
+                    ):
+                        frame_idx_out = response.get("frame_index", 0)
+                        outputs = response.get("outputs", {})
+                        if "out_binary_masks" in outputs:
+                            mask = outputs["out_binary_masks"]
+                            if mask.shape[0] > 0:
+                                merged_mask = np.any(mask, axis=0).astype(np.float32)
+                                output_masks[frame_idx_out] = torch.from_numpy(merged_mask)
+                                
+                        processed_frames += 1
+                        pbar.update_absolute(processed_frames, B)
+                        
+                    # 保存结果
+                    output_masks_list[task["orig_idx"]] = output_masks
+                    combined_masks_tensor = torch.max(combined_masks_tensor, output_masks)
 
-            # Start to propagate
-            output_masks = torch.zeros((B, H, W), dtype=torch.float32)
-            pbar = comfy.utils.ProgressBar(B)
-            processed_frames = 0
-
-            object_outputs = {"obj_ids":None, "obj_masks":[]}
-            object_masks_dict = {}
-
-            for response in video_predictor.handle_stream_request(
-                request=dict(
-                    type="propagate_in_video",
-                    session_id=session_id,
-                    propagation_direction=propagation_direction,
-                    start_frame_index=start_frame_index,
-                    max_frame_num_to_track=max_frames_to_track if max_frames_to_track != -1 else None,
-                )
-            ):
-                frame_idx = response.get("frame_index", 0)
-                outputs = response.get("outputs", {})
-                obj_ids = outputs.get("out_obj_ids", None)
-                if obj_ids is not None:
-                    object_outputs["obj_ids"] = obj_ids
-                if outputs:
-                    if "out_binary_masks" in outputs:
-                        mask = outputs["out_binary_masks"]
-                        if mask.shape[0] > 0:
-                            object_masks_dict[frame_idx] = mask
-                            merged_mask = np.any(mask, axis=0).astype(np.float32)
-                            output_masks[frame_idx] = torch.from_numpy(merged_mask)
-                        else:
-                            object_masks_dict[frame_idx] = np.zeros((1, H, W), dtype=np.float32)
-                    else:
-                        object_masks_dict[frame_idx] = np.zeros((1, H, W), dtype=np.float32)
-
-                processed_frames += 1
-                pbar.update_absolute(processed_frames, B)
-
-            # close session
+            # 关闭会话释放资源
             if close_after_propagation:
                 video_predictor.handle_request(
                     request=dict(
@@ -1435,123 +1336,36 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     )
                 )
 
-            # --- 修改版: 卸载模型与初步内存释放 ---
+            # 卸载模型
             if not keep_model_loaded:
-                if torch.cuda.is_available():
-                    mem_before = torch.cuda.memory_allocated() / (1024 ** 2)
-                    logger.info(f"🔍 [卸载前] 当前显存占用: {mem_before:.2f} MB")
-                
                 video_predictor.model.to(offload_device)
-                
                 if close_after_propagation:
                     video_predictor.shutdown()
-                    
                 mm.soft_empty_cache()
 
-        # 后续格式化输出结果逻辑 (不受上方清理影响，因为变量已转移至内存)
-        if len(object_masks_dict) > 0:
-            max_num_objects = max(mask.shape[0] for mask in object_masks_dict.values())
-            
-            obj_ids_array = object_outputs.get("obj_ids", None)
-            if obj_ids_array is not None and len(obj_ids_array) > 0:
-                object_first_positions = {}
-                for frame_idx in sorted(object_masks_dict.keys()):
-                    masks = object_masks_dict[frame_idx]
-                    if masks.shape[0] > 0:
-                        for obj_idx in range(masks.shape[0]):
-                            if obj_idx not in object_first_positions:
-                                mask = masks[obj_idx]
-                                cols = np.any(mask > 0, axis=0)
-                                if np.any(cols):
-                                    col_indices = np.nonzero(cols)[0]
-                                    center_x = np.mean(col_indices)
-                                    object_first_positions[obj_idx] = (frame_idx, center_x)
-                                else:
-                                    object_first_positions[obj_idx] = (frame_idx, W)
-                
-                if len(object_first_positions) > 0:
-                    sorted_obj_indices = sorted(
-                        object_first_positions.keys(),
-                        key=lambda idx: (object_first_positions[idx][1], object_first_positions[idx][0])
-                    )
-                    old_to_new_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_obj_indices)}
-
-                    if isinstance(obj_ids_array, np.ndarray):
-                        try:
-                            fill_val = obj_ids_array.dtype.type(-1)
-                            sorted_obj_ids = np.full((max_num_objects,), fill_val, dtype=obj_ids_array.dtype)
-                            for new_pos, old_idx in enumerate(sorted_obj_indices):
-                                if old_idx < obj_ids_array.shape[0]:
-                                    sorted_obj_ids[new_pos] = obj_ids_array[old_idx]
-                        except Exception:
-                            sorted_obj_ids = obj_ids_array
-                    elif isinstance(obj_ids_array, list):
-                        sorted_obj_ids = [None] * max_num_objects
-                        for new_pos, old_idx in enumerate(sorted_obj_indices):
-                            if old_idx < len(obj_ids_array):
-                                sorted_obj_ids[new_pos] = obj_ids_array[old_idx]
-                    else:
-                        sorted_obj_ids = obj_ids_array
-
-                    object_outputs["obj_ids"] = sorted_obj_ids
-
-                    sorted_object_masks_dict = {}
-                    for frame_idx, masks in object_masks_dict.items():
-                        if masks.shape[0] > 0:
-                            num_objects_in_frame = masks.shape[0]
-                            sorted_masks = np.zeros((max_num_objects, masks.shape[1], masks.shape[2]), dtype=masks.dtype)
-                            for old_idx in range(num_objects_in_frame):
-                                if old_idx in old_to_new_idx:
-                                    new_idx = old_to_new_idx[old_idx]
-                                    if 0 <= new_idx < max_num_objects:
-                                        sorted_masks[new_idx] = masks[old_idx]
-                            sorted_object_masks_dict[frame_idx] = sorted_masks
-                        else:
-                            sorted_object_masks_dict[frame_idx] = np.zeros((max_num_objects, H, W), dtype=np.float32)
-
-                    object_masks_dict = sorted_object_masks_dict
-
-            ordered_obj_masks = []
-            padded_masks = []
-            for frame_idx in range(B):
-                if frame_idx in object_masks_dict:
-                    mask = object_masks_dict[frame_idx]
-                    num_objects = mask.shape[0]
-                    if num_objects < max_num_objects:
-                        padding = np.zeros((max_num_objects - num_objects, H, W), dtype=np.float32)
-                        padded_mask = np.concatenate([mask, padding], axis=0)
-                        ordered_obj_masks.append(padded_mask)
-                        padded_masks.append(torch.from_numpy(padded_mask))
-                    else:
-                        ordered_obj_masks.append(mask)
-                        padded_masks.append(torch.from_numpy(mask))
-                else:
-                    empty_mask = np.zeros((max_num_objects, H, W), dtype=np.float32)
-                    ordered_obj_masks.append(empty_mask)
-                    padded_masks.append(torch.zeros((max_num_objects, H, W)))
-
-            object_masks = torch.stack(padded_masks, dim=0)
-            object_outputs["obj_masks"] = ordered_obj_masks
-        else:
-            object_masks = torch.zeros((B, 1, H, W))
-            object_outputs["obj_masks"] = []
-
-        # --- 新增: 强制且底层的最终垃圾回收 ---
+        # 垃圾回收与显存释放
         if not keep_model_loaded:
             if 'response' in locals():
                 del response
-            if 'object_masks_dict' in locals():
-                del object_masks_dict
+            if 'saved_cache' in locals():
+                del saved_cache
             
-            gc.collect()  # 触发 Python 垃圾回收
+            import gc
+            gc.collect()
             
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()  # 强制归还显存碎片给系统
+                torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
-                mem_after = torch.cuda.memory_allocated() / (1024 ** 2)
-                logger.info(f"✅ [彻底清理完毕] 当前显存占用降至: {mem_after:.2f} MB")
 
-        return io.NodeOutput(output_masks, session_id, object_outputs, object_masks)
+        # 返回 4 个独立遮罩 + 1 个组合遮罩
+        return io.NodeOutput(
+            output_masks_list[0], 
+            output_masks_list[1], 
+            output_masks_list[2], 
+            output_masks_list[3], 
+            combined_masks_tensor, 
+            session_id
+        )
 
 #-------------------------------------------------------------------------------------
 class Sam3VideoModelExtraConfig(io.ComfyNode):
