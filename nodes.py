@@ -857,7 +857,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
 #         video_predictor.model.recondition_every_nth_frame = 16
 #         video_predictor.model.masklet_confirmation_enable = False
 #         video_predictor.model.decrease_trk_keep_alive_for_empty_masklets = False
-#         video_predictor.model.image_size = 1008
+#         video_predictor.model.image_size = 512
 
 #         # Override with extra_config if provided
 #         if extra_config is not None and isinstance(extra_config, dict):
