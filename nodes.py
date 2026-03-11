@@ -1214,10 +1214,16 @@ class Sam3VideoSegmentation(io.ComfyNode):
         new_size = int(image_size)
         video_predictor.model.image_size = new_size
         
-        # 👇 新增：必须同步更新底层的文本检测器(detector)分辨率
-        # 否则视频轨道跑768，文本轨道跑1008，会导致位置编码张量(RoPE)崩溃！
+        # 同步更新文本检测器 (Detector)
         if hasattr(video_predictor.model, "detector"):
             video_predictor.model.detector.image_size = new_size
+
+        # 👇 新增：同步更新视频追踪器 (Tracker)
+        # 必须告诉 Tracker 特征图大小已经从 63 变成了 new_size // 16 (如 48 或 32)
+        if hasattr(video_predictor.model, "tracker"):
+            video_predictor.model.tracker.image_size = new_size
+            if hasattr(video_predictor.model.tracker, "sam_image_embedding_size"):
+                video_predictor.model.tracker.sam_image_embedding_size = new_size // 16
 
         if extra_config is not None and isinstance(extra_config, dict):
             for key, value in extra_config.items():
