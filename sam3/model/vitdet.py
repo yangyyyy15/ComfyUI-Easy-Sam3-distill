@@ -57,10 +57,36 @@ def compute_axial_cis(
     return torch.cat([freqs_cis_x, freqs_cis_y], dim=-1)
 
 
+# def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+#     ndim = x.ndim
+#     assert 0 <= 1 < ndim
+#     assert freqs_cis.shape == (x.shape[-2], x.shape[-1])
+#     shape = [d if i >= ndim - 2 else 1 for i, d in enumerate(x.shape)]
+#     return freqs_cis.view(*shape)
+
+
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     ndim = x.ndim
     assert 0 <= 1 < ndim
-    assert freqs_cis.shape == (x.shape[-2], x.shape[-1])
+    
+    # 动态适应分辨率：如果输入张量的空间大小与预设的位置编码不匹配，自动插值
+    if freqs_cis.shape != (x.shape[-2], x.shape[-1]):
+        # freqs_cis 是复数张量 (Complex Tensor)，直接插值会报错，需要先转为实数并增加 batch 和 channel 维度
+        h_old, w_old = freqs_cis.shape
+        h_new, w_new = x.shape[-2], x.shape[-1]
+        
+        # 提取实部和虚部
+        real = freqs_cis.real.unsqueeze(0).unsqueeze(0) # (1, 1, H, W)
+        imag = freqs_cis.imag.unsqueeze(0).unsqueeze(0)
+        
+        # 使用双线性插值拉伸到新的大小
+        real_interp = F.interpolate(real, size=(h_new, w_new), mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
+        imag_interp = F.interpolate(imag, size=(h_new, w_new), mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
+        
+        # 重新组合回复数形式，并归一化以保证旋转矩阵的性质不变
+        freqs_cis = torch.complex(real_interp, imag_interp)
+        freqs_cis = freqs_cis / freqs_cis.abs().clamp(min=1e-8)
+        
     shape = [d if i >= ndim - 2 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(*shape)
 
