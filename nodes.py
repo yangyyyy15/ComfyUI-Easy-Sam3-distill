@@ -1134,13 +1134,22 @@ class Sam3VideoSegmentation(io.ComfyNode):
                 io.String.Input("session_id", default=None, force_input=True, optional=True),
                 io.Image.Input("video_frames", tooltip="Video frames as image sequence"),
                 
-                # --- 新增: 4个独立的提示词输入框 ---
+                # --- 4个独立的提示词输入框 ---
                 io.String.Input("prompt_1", default="", multiline=True, tooltip="第1个部位提示词 (如: shirt)"),
                 io.String.Input("prompt_2", default="", multiline=True, tooltip="第2个部位提示词 (如: mask)"),
                 io.String.Input("prompt_3", default="", multiline=True, tooltip="第3个部位提示词"),
                 io.String.Input("prompt_4", default="", multiline=True, tooltip="第4个部位提示词"),
                 
                 io.Int.Input("frame_index", min=0, max=10 ** 5, step=1, tooltip="Frame where initial prompt is applied"),
+                
+                # --- 新增: image_size 选项 ---
+                io.Combo.Input(
+                    "image_size", 
+                    options=["512", "768", "1008"], 
+                    default="768", 
+                    tooltip="内部推理分辨率: 512最快且省显存，768均衡(推荐720P使用)，1008精度最高(适合1080P+)"
+                ),
+                
                 io.Float.Input("score_threshold_detection", default=0.5, min=0.0, max=1.0, step=0.05, tooltip="Confidence threshold for detections, default is 0.5"),
                 io.Float.Input("new_det_thresh", default=0.7, min=0.0, max=1.0, step=0.05, tooltip="Threshold for a detection to be added as a new object, default is 0.7"),
                 io.Combo.Input("propagation_direction", options=["both", "forward", "backward"], default="both"),
@@ -1154,7 +1163,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
                 io.BBOX.Input("bbox", display_name="bbox", optional=True),
             ],
             outputs=[
-                # --- 新增: 直接输出分离的遮罩 ---
+                # --- 直接输出分离的遮罩 ---
                 io.Mask.Output("mask_1", display_name="mask_1"),
                 io.Mask.Output("mask_2", display_name="mask_2"),
                 io.Mask.Output("mask_3", display_name="mask_3"),
@@ -1165,7 +1174,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, sam3_model, video_frames, prompt_1, prompt_2, prompt_3, prompt_4, frame_index, score_threshold_detection, new_det_thresh, propagation_direction, start_frame_index=0, max_frames_to_track=-1, close_after_propagation=True, keep_model_loaded=False, session_id=None, extra_config=None, positive_coords=None, negative_coords=None, bbox=None) -> io.NodeOutput:
+    def execute(cls, sam3_model, video_frames, prompt_1, prompt_2, prompt_3, prompt_4, frame_index, image_size, score_threshold_detection, new_det_thresh, propagation_direction, start_frame_index=0, max_frames_to_track=-1, close_after_propagation=True, keep_model_loaded=False, session_id=None, extra_config=None, positive_coords=None, negative_coords=None, bbox=None) -> io.NodeOutput:
         offload_device = mm.unet_offload_device()
 
         video_predictor = sam3_model.get("model", None)
@@ -1200,14 +1209,16 @@ class Sam3VideoSegmentation(io.ComfyNode):
         video_predictor.model.recondition_every_nth_frame = 16
         video_predictor.model.masklet_confirmation_enable = False
         video_predictor.model.decrease_trk_keep_alive_for_empty_masklets = False
-        video_predictor.model.image_size = 1008
+        
+        # --- 核心修改: 动态读取前端界面传来的分辨率参数 ---
+        video_predictor.model.image_size = int(image_size)
 
         if extra_config is not None and isinstance(extra_config, dict):
             for key, value in extra_config.items():
                 if hasattr(video_predictor.model, key):
                     setattr(video_predictor.model, key, value)
 
-        # 1. 启动会话 (提取并缓存全视频的特征，最耗时的一步)
+        # 1. 启动会话 (提取并缓存全视频的特征)
         video_pil = tensor_to_pil(video_frames)
         response = video_predictor.handle_request(
             request=dict(
@@ -1270,7 +1281,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
                 for task_i, task in enumerate(active_tasks):
                     logger.info(f"🚀 开始处理部位 {task['orig_idx'] + 1}: {task['text']}")
                     
-                    # 💡 核心魔法：从第二个词开始，备份特征缓存字典 (浅拷贝足以保留 Tensor 引用)
+                    # 💡 备份特征缓存字典
                     if task_i > 0:
                         saved_cache = inference_state.get("feature_cache", {}).copy()
                         
@@ -1279,7 +1290,6 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     req_bboxes = bounding_boxes if task["use_geo"] else None
                     req_bbox_labels = bounding_box_labels if task["use_geo"] else None
                     
-                    # add_prompt 内部会清空 inference_state 以保证干净的开始
                     video_predictor.handle_request(
                         request=dict(
                             type="add_prompt",
@@ -1294,11 +1304,10 @@ class Sam3VideoSegmentation(io.ComfyNode):
                         )
                     )
                     
-                    # 💡 核心魔法：在它清空后，立刻把特征缓存塞回去！跳过重新提取特征的耗时
+                    # 💡 恢复特征缓存
                     if task_i > 0:
                         inference_state["feature_cache"].update(saved_cache)
                         
-                    # 开始传播追踪 (极速)
                     output_masks = torch.zeros((B, H, W), dtype=torch.float32)
                     pbar = comfy.utils.ProgressBar(B)
                     processed_frames = 0
@@ -1323,11 +1332,9 @@ class Sam3VideoSegmentation(io.ComfyNode):
                         processed_frames += 1
                         pbar.update_absolute(processed_frames, B)
                         
-                    # 保存结果
                     output_masks_list[task["orig_idx"]] = output_masks
                     combined_masks_tensor = torch.max(combined_masks_tensor, output_masks)
 
-            # 关闭会话释放资源
             if close_after_propagation:
                 video_predictor.handle_request(
                     request=dict(
@@ -1336,14 +1343,12 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     )
                 )
 
-            # 卸载模型
             if not keep_model_loaded:
                 video_predictor.model.to(offload_device)
                 if close_after_propagation:
                     video_predictor.shutdown()
                 mm.soft_empty_cache()
 
-        # 垃圾回收与显存释放
         if not keep_model_loaded:
             if 'response' in locals():
                 del response
@@ -1357,7 +1362,6 @@ class Sam3VideoSegmentation(io.ComfyNode):
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
 
-        # 返回 4 个独立遮罩 + 1 个组合遮罩
         return io.NodeOutput(
             output_masks_list[0], 
             output_masks_list[1], 
