@@ -192,6 +192,21 @@ class SimpleMaskEncoder(nn.Module):
         pix_feat = pix_feat.to(masks.device)
 
         x = self.pix_feat_proj(pix_feat)
+
+        # 👇 --- 新增: 动态同步分辨率 --- 👇
+        if x.shape[-2:] != masks.shape[-2:]:
+            import torch.nn.functional as F
+            # 以 backbone 提取出的真实视觉特征图 x 的尺寸为准，对 mask 进行对齐
+            masks = F.interpolate(
+                masks, 
+                size=x.shape[-2:], 
+                mode="bilinear", 
+                align_corners=False
+            )
+        # 👆 --- 新增结束 --- 👆
+
+
+        
         x = x + masks
         x = self.fuser(x)
         x = self.out_proj(x)
