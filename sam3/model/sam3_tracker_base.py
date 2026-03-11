@@ -274,22 +274,10 @@ class Sam3TrackerBase(torch.nn.Module):
             self.low_res_mask_size = cur_embed_size * 4
             self.input_mask_size = self.low_res_mask_size * 4
             
+            # 只需要告诉 PromptEncoder 新尺寸，它内部会自动按新尺寸扩展
             if hasattr(self, "sam_prompt_encoder"):
                 self.sam_prompt_encoder.image_embedding_size = (cur_embed_size, cur_embed_size)
                 self.sam_prompt_encoder.input_image_size = (self.image_size, self.image_size)
-                
-                # 动态插值拉伸 PromptEncoder 内部无掩码时的缓冲张量，防止后续运算形状不匹配
-                if hasattr(self.sam_prompt_encoder, "no_mask_embed"):
-                    old_no_mask = self.sam_prompt_encoder.no_mask_embed.data
-                    if old_no_mask.shape[-1] != cur_embed_size:
-                        import torch.nn.functional as F
-                        new_no_mask = F.interpolate(
-                            old_no_mask, 
-                            size=(cur_embed_size, cur_embed_size), 
-                            mode="bilinear", 
-                            align_corners=False
-                        )
-                        self.sam_prompt_encoder.no_mask_embed = torch.nn.Parameter(new_no_mask)
         # 👆 ----------- 新增：动态分辨率自适应与自愈机制 ----------- 👆
 
 
